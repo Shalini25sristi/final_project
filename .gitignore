@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build artifacts
+*.dll
+*.so
+*.o
+*.exe
+
+# Editor / IDE
+.vscode/
+tempCodeRunnerFile.py
+
+# Windows artifacts
+desktop.ini
+*:Zone.Identifier
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Memory Leak &amp; Resource Anomaly Detection</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='4' fill='%2338bdf8'/></svg>" />
+</head>
+<body class="loading">
+
+  <!-- ambient background -->
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+  </div>
+  <div class="grid-lines" aria-hidden="true"></div>
+
+  <!-- ================= Sticky header ================= -->
+  <header class="topbar glass">
+    <div class="brand">
+      <div class="logo-wrap">
+        <svg class="logo" viewBox="0 0 48 48" width="40" height="40" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#6366f1"/>
+            </linearGradient>
+          </defs>
+          <rect x="4" y="4" width="40" height="40" rx="11" fill="url(#lg)"/>
+          <path d="M13 30v-6M19 30v-12M25 30V12 M31 30V8M37 30V20" stroke="#0b1220" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+          <line x1="11" y1="34" x2="37" y2="34" stroke="#0b1220" stroke-width="3.2" stroke-linecap="round"/>
+        </svg>
+        <span class="live-badge">LIVE</span>
+      </div>
+      <div class="brand-text">
+        <h1>Sentinel · Anomaly Detection Suite</h1>
+        <p id="subtitle">Real-time telemetry · Isolation Forest scoring</p>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="clock-block">
+        <span class="clock" id="clock">--:--:--</span>
+        <span class="session" id="session">session 00:00</span>
+      </div>
+      <div class="status-pill" id="statusPill">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Connecting</span>
+      </div>
+      <button class="btn btn-ghost icon-btn" id="btnRefresh" title="Reconnect to stream">⟳</button>
+    </div>
+  </header>
+
+  <!-- ================= Warning banner ================= -->
+  <div class="warning-banner" id="warningBanner" hidden>
+    <span class="banner-ico">⚠</span>
+    <div class="banner-text">
+      <strong>Leak Suspected</strong>
+      <span id="bannerDetail">—</span>
+    </div>
+    <button class="btn btn-mini" id="bannerClose">×</button>
+  </div>
+
+  <!-- ================= Gauge cards ================= -->
+  <section class="cards" id="cards">
+    <article class="card glass" data-metric="mem">
+      <div class="gauge-wrap">
+        <svg class="gauge" viewBox="0 0 120 120">
+          <defs>
+            <linearGradient id="gMem" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#2b6de8"/>
+            </linearGradient>
+          </defs>
+          <circle class="g-track" cx="60" cy="60" r="50"/>
+          <circle class="g-prog" id="gMem" cx="60" cy="60" r="50" stroke="url(#gMem)"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="g-value"><b data-gval="mem">0</b><small>MB</small></span>
+          <span class="g-label">MEMORY</span>
+        </div>
+      </div>
+      <div class="card-meta">
+        <span class="sub" id="metaMem">of threshold 500 MB</span>
+        <canvas class="spark" id="spMem" width="140" height="34"></canvas>
+      </div>
+    </article>
+
+    <article class="card glass" data-metric="cpu">
+      <div class="gauge-wrap">
+        <svg class="gauge" viewBox="0 0 120 120">
+          <defs>
+            <linearGradient id="gCpu" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#fb923c"/><stop offset="1" stop-color="#f43f5e"/>
+            </linearGradient>
+          </defs>
+          <circle class="g-track" cx="60" cy="60" r="50"/>
+          <circle class="g-prog" id="gCpu" cx="60" cy="60" r="50" stroke="url(#gCpu)"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="gCpu"><b data-count="cpu">0</b><small>%</small></span>
+          <span class="g-label">CPU USAGE</span>
+        </div>
+      </div>
+      <div class="card-meta">
+        <span class="sub">of 100% peak</span>
+        <canvas class="spark" id="spCpu" width="140" height="34"></canvas>
+      </div>
+    </article>
+
+    <article class="card glass" data-metric="risk">
+      <div class="gauge-wrap">
+        <svg class="gauge" viewBox="0 0 120 120">
+          <defs>
+            <linearGradient id="gRisk" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#34d399"/><stop offset=".5" stop-color="#fbbf24"/><stop offset="1" stop-color="#f87171"/>
+            </linearGradient>
+          </defs>
+          <circle class="g-track" cx="60" cy="60" r="50"/>
+          <circle class="g-prog" id="gRisk" cx="60" cy="60" r="50" stroke="url(#gRisk)"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="gRisk"><b data-count="risk">0</b><small>%</small></span>
+          <span class="g-label">LEAK RISK</span>
+        </div>
+      </div>
+      <div class="card-meta">
+        <span class="sub" id="metaRisk">≥ 60% flagged</span>
+        <canvas class="spark" id="spRisk" width="140" height="34"></canvas>
+      </div>
+    </article>
+
+    <article class="card glass" data-metric="health">
+      <div class="gauge-wrap">
+        <svg class="gauge" viewBox="0 0 120 120">
+          <defs>
+            <linearGradient id="gHealth" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#0ea5e9"/>
+            </linearGradient>
+          </defs>
+          <circle class="g-track" cx="60" cy="60" r="50"/>
+          <circle class="g-prog" id="gHealth" cx="60" cy="60" r="50" stroke="url(#gHealth)"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="gHealth"><b data-count="health">100</b><small>%</small></span>
+          <span class="g-label">HEALTH</span>
+        </div>
+      </div>
+      <div class="card-meta">
+        <span class="sub" id="metaHealth">Nominal</span>
+        <canvas class="spark" id="sparkBtn" width="140" height="34"></canvas>
+      </div>
+    </article>
+  </section>
+
+  <!-- ================= Main grid ================= -->
+  <section class="main-grid">
+    <article class="panel glass">
+      <div class="panel-head">
+        <h2>Resource Usage Over Time</h2>
+        <div class="legend">
+          <span><i class="swatch" style="--c:#38bdf8"></i>Memory (MB)</span>
+          <span><i class="swatch" style="--c:#fb923c"></i>CPU (%)</span>
+          <span><i class="swatch dash" style="--c:#fbbf24"></i>Threshold</span>
+          <span><i class="swatch x" style="--c:#f87171"></i>Warning</span>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+      </div>
+    </div>
+
+    <div class="side">
+      <!-- Threat level -->
+      <div class="panel glass threat-panel">
+        <div class="panel-head" style="margin-bottom:14px">
+          <h2>Threat Level</h2>
+          <span class="tw" id="threatTag">STABLE</span>
+        </div>
+        <div class="threat-ring">
+          <div class="th-ring" id="thRing"><b id="thVal">100</b><span>health</span></div>
+          <div class="th-info">
+            <strong id="thLabel">System Nominal</strong>
+            <p id="thDesc">No anomalous resource growth detected.</p>
+          </div>
+        </div>
+        <div class="seg-meter" id="segMeter">
+          <span data-lvl="0"><i></i>Stable</span>
+          <span data-lvl="1"><i></i>Elevated</span>
+          <span data-lvl="2"><i></i>High</span>
+          <span data-lvl="3"><i></i>Critical</span>
+        </div>
+      </article>
+
+      <article class="panel glass alerts-panel">
+        <div class="panel-head">
+          <h2>Flagged Events</h2>
+          <span class="badge" id="alertCount">0</span>
+        </div>
+        <ul class="alerts" id="alerts">
+          <li class="empty">No warning points flagged yet.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Controls ================= -->
+  <section class="controls glass">
+    <div class="control-group">
+      <label for="threshold">Memory Threshold (MB)</label>
+      <div class="input-row">
+        <input id="threshold" type="number" min="1" step="10" value="500" />
+        <button class="btn btn-set ripple" id="btnSet">Apply</button>
+      </div>
+    </div>
+
+    <div class="control-group toggle-group">
+      <button class="btn btn-start ripple" id="btnStart">▶ Start</button>
+      <button class="btn btn-stop ripple" id="btnStop">■ Stop</button>
+    </div>
+
+    <div class="control-group">
+      <button class="btn btn-export ripple" id="btnExport">⬇ Export CSV</button>
+    </div>
+
+    <div class="tick" id="tick">● stream live</div>
+  </section>
+
+  <!-- ================= Footer ================= -->
+  <footer class="footer">
+    <span id="samplesInfo">Samples: 0</span>
+    <span id="backendInfo">mode: —</span>
+    <span id="freshInfo">last update: —</span>
+  </footer>
+
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
