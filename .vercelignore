@@ -1,0 +1,14 @@
+# The Vercel deployment ships only the web demo (static dashboard + api/
+# serverless functions). Python desktop sources stay on GitHub but are
+# excluded here so Vercel doesn't try to build them as Python functions.
+main.py
+requirements.txt
+build.ps1
+c_core/
+memory_leak_detector/*.py
+__pycache__/
+*.pyc
+.vscode/
+desktop.ini
+*:Zone.Identifier
+.vercel

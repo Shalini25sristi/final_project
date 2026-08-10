@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/export.csv", "destination": "/api/export_csv" },
+    { "source": "/", "destination": "/memory_leak_detector/web/index.html" },
+    { "source": "/((?!api/|memory_leak_detector/).*)", "destination": "/memory_leak_detector/web/$1" }
+  ]
+}

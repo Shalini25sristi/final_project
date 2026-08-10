@@ -26,6 +26,7 @@ const state = { times: [], mem: [], cpu: [], risk: [], health: [] };
 const seenAlerts = new Set();
 let threshold = 500, running = true, sessionStart = Date.now();
 let chart = null, sparks = {};
+let apiFailures = 0;
 
 /* ============================================================
    Gauges — animated SVG rings
@@ -167,15 +168,122 @@ function tickClock() {
 }
 
 /* ============================================================
+   Demo mode — simulated telemetry when no backend is reachable
+   (e.g. the dashboard is served from static hosting such as
+   Firebase). Local usage with the real Python backend is
+   unaffected: demo mode only activates after repeated API
+   failures.
+   ============================================================ */
+const demo = {
+  active: false,
+  t: 0,
+  mem: 230,
+  cpu: 22,
+  leakPhase: false,
+  times: [], mems: [], cpus: [],
+  alerts: [],
+  history: [],
+  last: null,
+};
+
+function demoStep() {
+  if (!running && demo.last) return demo.last;
+
+  demo.t += 1;
+  // Randomly drift into (and out of) a simulated leak phase.
+  if (!demo.leakPhase && Math.random() < 0.015) demo.leakPhase = true;
+  else if (demo.leakPhase && Math.random() < 0.04) demo.leakPhase = false;
+
+  const drift = demo.leakPhase ? 5 + Math.random() * 9 : -1.5 + Math.random() * 4;
+  demo.mem = Math.max(110, demo.mem + drift + (Math.random() - 0.5) * 5);
+  demo.cpu = Math.min(98, Math.max(4, demo.cpu + (Math.random() - 0.5) * 16));
+
+  const pressure = demo.mem / threshold;
+  const risk = Math.round(Math.min(99, Math.max(2,
+    pressure * 52 + (demo.leakPhase ? 24 : 0) + (Math.random() - 0.5) * 14)));
+  const health = Math.max(1, 100 - risk);
+  const breached = demo.mem > threshold;
+  const warning = risk >= 60 || breached;
+
+  demo.times.push(demo.t); demo.mems.push(demo.mem); demo.cpus.push(demo.cpu);
+  if (demo.times.length > CONFIG.HISTORY) { demo.times.shift(); demo.mems.shift(); demo.cpus.shift(); }
+  if (warning) demo.alerts.push([demo.t, +demo.mem.toFixed(1)]);
+
+  const latest = {
+    timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
+    sample: demo.t,
+    memory_mb: demo.mem.toFixed(2),
+    cpu_percent: demo.cpu.toFixed(2),
+    risk_score_percent: risk,
+    system_health_percent: health,
+    threshold_mb: threshold.toFixed(0),
+    threshold_breached: breached ? "YES" : "NO",
+    status: warning ? "WARNING" : "STABLE",
+  };
+  demo.history.push(latest);
+  if (demo.history.length > 5000) demo.history = demo.history.slice(-5000);
+
+  demo.last = {
+    running,
+    backend: "browser demo · simulated telemetry",
+    threshold,
+    sample_count: demo.history.length,
+    latest,
+    times: demo.times.slice(),
+    memory: demo.mems.slice(),
+    cpu: demo.cpus.slice(),
+    alerts: demo.alerts.slice(-60),
+    cpu_max: 100,
+  };
+  return demo.last;
+}
+
+function startDemo() {
+  if (demo.active) return;
+  demo.active = true;
+  sessionStart = Date.now();
+  const badge = document.querySelector(".live-badge");
+  if (badge) badge.textContent = "DEMO";
+  // Warm-up so the charts are not empty on first paint.
+  for (let i = 0; i < 39; i++) {
+    const p = demoStep();
+    state.mem.push(parseFloat(p.latest.memory_mb));
+    state.cpu.push(parseFloat(p.latest.cpu_percent));
+    state.risk.push(p.latest.risk_score_percent);
+    state.health.push(p.latest.system_health_percent);
+  }
+  console.info("[demo] Backend unreachable — running on simulated telemetry.");
+  render(demoStep());
+}
+
+const CSV_FIELDS = ["timestamp","sample","memory_mb","cpu_percent","risk_score_percent","system_health_percent","threshold_mb","threshold_breached","status"];
+function downloadDemoCsv() {
+  const rows = [CSV_FIELDS.join(",")].concat(
+    demo.history.map((r) => CSV_FIELDS.map((f) => r[f]).join(","))
+  );
+  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `monitoring_logs_demo_${new Date().toISOString().slice(0, 19).replace(/[:T-]/g, "")}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ============================================================
    Snapshot driver
    ============================================================ */
 async function fetchSnapshot() {
+  if (demo.active) { render(demoStep()); return; }
   try {
-    const res = await fetch("/api/snapshot", { cache: "no-store" });
+    // Serverless backends are stateless: echo our client-side state on each poll.
+    const res = await fetch(`/api/snapshot?threshold=${threshold}&running=${running ? 1 : 0}`, { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
+    apiFailures = 0;
     await render(await res.json());
   } catch {
-    onDisconnect();
+    apiFailures += 1;
+    if (apiFailures >= 3) startDemo();
+    else onDisconnect();
   }
 }
 
@@ -266,6 +374,7 @@ async function render(d) {
    Controls
    ============================================================ */
 async function post(path, body) {
+  if (demo.active) return { ok: true, demo: true }; // controls act on local demo state
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -282,15 +391,18 @@ els.btnSet.addEventListener("click", async () => {
   els.metaMem.textContent = `threshold ${v.toFixed(0)} MB — of ${v.toFixed(0)}`;
 });
 
-els.btnStart.addEventListener("click", async () => { await post("/api/start"); els.tick.className = "tick live"; });
-els.btnStop.addEventListener("click", async () => { await post("/api/stop"); els.tick.className = "tick idle"; });
+els.btnStart.addEventListener("click", async () => { await post("/api/start"); running = true; els.tick.className = "tick live"; });
+els.btnStop.addEventListener("click", async () => { await post("/api/stop"); running = false; els.tick.className = "tick idle"; });
 
 els.btnExport.addEventListener("click", async () => {
   const btn = els.btnExport;
   const orig = btn.innerHTML;
   btn.innerHTML = '<span class="spinner"></span>';
   btn.disabled = true;
-  try { location.href = "/api/export.csv"; }
+  try {
+    if (demo.active) downloadDemoCsv();
+    else location.href = "/api/export.csv?threshold=" + threshold;
+  }
   finally { setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 900); }
 });
 
